@@ -29,6 +29,12 @@ var MultiAddr string
 // MultiOrder : The order current tester is
 var MultiOrder int
 
+// RedisAddr : Redis address for multiple read clients
+var ReadClientAddrs string
+
+// Wait time for writes to get replicated
+var WaitTime int
+
 // Parse configure from command line flags
 func Parse() {
 	flag.StringVar(&RedisAddr, "a", "localhost:6379", "Redis instance address or Cluster addresses. IP:PORT[,IP:PORT]")
@@ -39,5 +45,7 @@ func Parse() {
 	flag.IntVar(&DataSize, "d", 1000, "Data size in bytes")
 	flag.StringVar(&MultiAddr, "ma", "", "addresses for run multiple testers at the same time")
 	flag.IntVar(&MultiOrder, "mo", 0, "the order current tester is in multiple testers")
+	flag.StringVar(&ReadClientAddrs, "cl", "127.0.0.1:6379", "addresses for multiple read replicas")
+	flag.IntVar(&WaitTime, "wt", 10, "Wait time(in seconds) for writes to get replicated")
 	flag.Parse()
 }

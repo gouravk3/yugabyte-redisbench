@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -46,6 +47,39 @@ func executeDel(id int, times int, redisClient redis.UniversalClient) {
 	}
 }
 
+func executeGet(id int, times int, redisClient redis.UniversalClient) {
+	defer tester.Wg.Done()
+	var err error
+	for i := 0; i < times; i++ {
+		key := fmt.Sprintf("%s.%d.%d", keyPrefix, id, i)
+		err = redisClient.Get(context.Background(), key).Err()
+		utils.FatalErr(err)
+	}
+}
+
+func createReadClients() (clients []redis.UniversalClient) {
+	addrArr := strings.Split(config.ReadClientAddrs, ",")
+	for _, addr := range addrArr {
+		client := redis.NewUniversalClient(&redis.UniversalOptions{
+			Addrs:    []string{addr},
+			Password: config.RedisPassword,
+			DB:       config.RedisDB,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+		_, err := client.Ping(ctx).Result()
+		if err != nil {
+			cancel()
+			return nil
+		}
+
+		clients = append(clients, client)
+		cancel()
+	}
+
+	return
+}
+
 func main() {
 	// Parse config arguments from command-line
 	config.Parse()
@@ -76,7 +110,7 @@ func main() {
 	utils.FatalErr(err)
 
 	// Run certain number clients for testing
-	log.Info().Msg("Testing...")
+	log.Info().Msg("Testing Write...")
 	t1 := time.Now()
 	for i := 0; i < config.ClientNum; i++ {
 		tester.Wg.Add(1)
@@ -85,19 +119,44 @@ func main() {
 	tester.Wg.Wait()
 	t2 := time.Now()
 
+	log.Info().Msgf("Waiting %d seconds before testing read...", config.WaitTime)
+	time.Sleep(time.Second * time.Duration(config.WaitTime))
+
+	log.Info().Msg("Testing Read...")
+	readClients := createReadClients()
+	l := len(readClients)
+	t3 := time.Now()
+	for i := 0; i < config.ClientNum; i++ {
+		index := i % l
+		tester.Wg.Add(1)
+		go executeGet(i, config.TestTimes, readClients[index])
+	}
+	tester.Wg.Wait()
+	t4 := time.Now()
+
 	// Calculate the duration
 	dur := t2.Sub(t1)
+	durRead := t4.Sub(t3)
+
 	order := 1
 	if tester.Multi != nil {
 		order = tester.Multi.Order
 	}
 	result := &models.NodeResult{Order: order, TotalTimes: totalTimes, TsBeg: t1, TsEnd: t2, TotalDur: dur}
+	resultRead := &models.NodeResult{Order: order, TotalTimes: totalTimes, TsBeg: t3, TsEnd: t4, TotalDur: durRead}
+
 	if tester.Multi == nil {
 		log.Info().
 			Int64("times", result.TotalTimes).
 			Stringer("duration", result.TotalDur).
 			Int64("tps", tester.CalTps(result.TotalTimes, result.TotalDur)).
-			Msg("* Result")
+			Msg("* Write Result")
+
+		log.Info().
+			Int64("times", resultRead.TotalTimes).
+			Stringer("duration", resultRead.TotalDur).
+			Int64("tps", tester.CalTps(resultRead.TotalTimes, resultRead.TotalDur)).
+			Msg("* Read Result")
 
 	} else {
 		if !tester.Multi.IsMaster() {
