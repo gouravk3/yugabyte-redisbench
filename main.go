@@ -13,6 +13,7 @@ import (
 	"github.com/panjiang/redisbench/config"
 	"github.com/panjiang/redisbench/internal/datasize"
 	"github.com/panjiang/redisbench/models"
+	"github.com/panjiang/redisbench/statreader"
 	"github.com/panjiang/redisbench/tester"
 	"github.com/panjiang/redisbench/utils"
 	"github.com/panjiang/redisbench/wares"
@@ -98,12 +99,14 @@ func main() {
 		}
 	}
 
-	writeFile, err := os.OpenFile(fmt.Sprintf("temp/write_%v.txt", time.Now().Format(time.RFC3339)), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	writeFilePath := fmt.Sprintf("temp/write_%v.txt", time.Now().Format(time.RFC3339))
+	writeFile, err := os.OpenFile(writeFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		panic(err)
 	}
 
-	readFile, err := os.OpenFile(fmt.Sprintf("temp/read_%v.txt", time.Now().Format(time.RFC3339)), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	readFilePath := fmt.Sprintf("temp/read_%v.txt", time.Now().Format(time.RFC3339))
+	readFile, err := os.OpenFile(readFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		panic(err)
 	}
@@ -201,6 +204,8 @@ func main() {
 				Msg("* Summary")
 		}
 	}
+	go statreader.PercentileCal(writeFilePath)
+	go statreader.PercentileCal(readFilePath)
 
 	log.Debug().Msg("Deleting testing data...")
 	for i := 0; i < config.ClientNum; i++ {
