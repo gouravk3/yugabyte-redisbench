@@ -28,13 +28,15 @@ const (
 	keyPrefix = "benchmark-set"
 )
 
-func executeSet(id int, times int, size int, redisClient redis.UniversalClient) {
+func executeSet(id int, times int, size int, redisClient redis.UniversalClient, file *os.File) {
 	defer tester.Wg.Done()
 	val := utils.RandSeq(size)
 	var err error
 	for i := 0; i < times; i++ {
 		key := fmt.Sprintf("%s.%d.%d", keyPrefix, id, i)
+		t := time.Now()
 		err = redisClient.Set(context.Background(), key, val, 0).Err()
+		go file.WriteString(fmt.Sprintf("\n%f", time.Since(t).Seconds()*1000))
 		utils.FatalErr(err)
 	}
 }
@@ -47,12 +49,14 @@ func executeDel(id int, times int, redisClient redis.UniversalClient) {
 	}
 }
 
-func executeGet(id int, times int, redisClient redis.UniversalClient) {
+func executeGet(id int, times int, redisClient redis.UniversalClient, file *os.File) {
 	defer tester.Wg.Done()
 	var err error
 	for i := 0; i < times; i++ {
 		key := fmt.Sprintf("%s.%d.%d", keyPrefix, id, i)
+		t := time.Now()
 		err = redisClient.Get(context.Background(), key).Err()
+		go file.WriteString(fmt.Sprintf("\n%f", time.Since(t).Seconds()*1000))
 		utils.FatalErr(err)
 	}
 }
@@ -87,6 +91,23 @@ func main() {
 		tester.RPCRun()
 	}
 
+	if _, err := os.Stat("temp"); os.IsNotExist(err) {
+		err := os.Mkdir("temp", os.ModePerm)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	writeFile, err := os.OpenFile(fmt.Sprintf("temp/write_%v.txt", time.Now().Format(time.RFC3339)), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		panic(err)
+	}
+
+	readFile, err := os.OpenFile(fmt.Sprintf("temp/read_%v.txt", time.Now().Format(time.RFC3339)), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		panic(err)
+	}
+
 	tester.Wg.Wait()
 
 	// Print test initial information
@@ -114,7 +135,7 @@ func main() {
 	t1 := time.Now()
 	for i := 0; i < config.ClientNum; i++ {
 		tester.Wg.Add(1)
-		go executeSet(i, config.TestTimes, config.DataSize, redisClient)
+		go executeSet(i, config.TestTimes, config.DataSize, redisClient, writeFile)
 	}
 	tester.Wg.Wait()
 	t2 := time.Now()
@@ -129,7 +150,7 @@ func main() {
 	for i := 0; i < config.ClientNum; i++ {
 		index := i % l
 		tester.Wg.Add(1)
-		go executeGet(i, config.TestTimes, readClients[index])
+		go executeGet(i, config.TestTimes, readClients[index], readFile)
 	}
 	tester.Wg.Wait()
 	t4 := time.Now()
