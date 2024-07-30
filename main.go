@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,17 +31,24 @@ const (
 	keyPrefix = "benchmark-set"
 )
 
-func executeSet(id int, times int, size int, redisClient redis.UniversalClient, file *os.File) {
+func executeSet(id int, times int, size int, redisClient redis.UniversalClient, arrChan chan []float64) {
 	defer tester.Wg.Done()
 	val := utils.RandSeq(size)
-	var err error
+	arr := make([]float64, times)
+	var (
+		err error
+	)
 	for i := 0; i < times; i++ {
 		key := fmt.Sprintf("%s.%d.%d", keyPrefix, id, i)
 		t := time.Now()
 		err = redisClient.Set(context.Background(), key, val, 0).Err()
-		go file.WriteString(fmt.Sprintf("\n%f", time.Since(t).Seconds()*1000))
 		utils.FatalErr(err)
+
+		arr[i] = time.Since(t).Seconds() * 1000
 	}
+
+	arrChan <- arr
+	time.Sleep(time.Microsecond * 100)
 }
 
 func executeDel(id int, times int, redisClient redis.UniversalClient) {
@@ -50,16 +59,21 @@ func executeDel(id int, times int, redisClient redis.UniversalClient) {
 	}
 }
 
-func executeGet(id int, times int, redisClient redis.UniversalClient, file *os.File) {
+func executeGet(id int, times int, redisClient redis.UniversalClient, arrChan chan []float64) {
 	defer tester.Wg.Done()
+	arr := make([]float64, times)
 	var err error
 	for i := 0; i < times; i++ {
 		key := fmt.Sprintf("%s.%d.%d", keyPrefix, id, i)
 		t := time.Now()
 		err = redisClient.Get(context.Background(), key).Err()
-		go file.WriteString(fmt.Sprintf("\n%f", time.Since(t).Seconds()*1000))
 		utils.FatalErr(err)
+
+		arr[i] = time.Since(t).Seconds() * 1000
 	}
+
+	arrChan <- arr
+	time.Sleep(time.Microsecond * 100)
 }
 
 func createReadClients() (clients []redis.UniversalClient) {
@@ -85,6 +99,50 @@ func createReadClients() (clients []redis.UniversalClient) {
 	return
 }
 
+func fileWriter(arrChan chan []float64, file *os.File) {
+	for arr := range arrChan {
+		if err := binary.Write(file, binary.LittleEndian, arr); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func fileReader(name string) {
+	file, err := os.Open(name)
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return
+	}
+	defer file.Close()
+	var data []float64
+	fileInfo, err := file.Stat()
+	if err != nil {
+		fmt.Println("Error getting file info:", err)
+		return
+	}
+
+	numFloats := fileInfo.Size() / 8
+
+	data = make([]float64, numFloats)
+	if err := binary.Read(file, binary.LittleEndian, &data); err != nil {
+		panic(err)
+	}
+	sort.Float64s(data)
+
+	min := data[0]
+	max := data[len(data)-1]
+
+	p90 := statreader.Percentile(data, 90)
+	p95 := statreader.Percentile(data, 95)
+	p99 := statreader.Percentile(data, 99)
+
+	if strings.Contains(name, "write") {
+		log.Info().Msgf("Write percentile - p90: %.6f, p95: %.6f, p99: %.6f, min: %.6f, max: %.6f", p90, p95, p99, min, max)
+	} else {
+		log.Info().Msgf("Read percentile - p90: %.6f, p95: %.6f, p99: %.6f, min: %.6f, max: %.6f", p90, p95, p99, min, max)
+	}
+}
+
 func main() {
 	// Parse config arguments from command-line
 	config.Parse()
@@ -104,6 +162,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	writerArrChan := make(chan []float64)
+	go func() {
+		fileWriter(writerArrChan, writeFile)
+	}()
 
 	readFilePath := fmt.Sprintf("temp/read_%v.txt", time.Now().Format(time.RFC3339))
 	readFile, err := os.OpenFile(readFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -133,18 +196,21 @@ func main() {
 	redisClient, err := wares.NewUniversalRedisClient()
 	utils.FatalErr(err)
 
-	// Run certain number clients for testing
 	log.Info().Msg("Testing Write...")
 	t1 := time.Now()
 	for i := 0; i < config.ClientNum; i++ {
 		tester.Wg.Add(1)
-		go executeSet(i, config.TestTimes, config.DataSize, redisClient, writeFile)
+		go executeSet(i, config.TestTimes, config.DataSize, redisClient, writerArrChan)
 	}
 	tester.Wg.Wait()
 	t2 := time.Now()
 
 	log.Info().Msgf("Waiting %d seconds before testing read...", config.WaitTime)
 	time.Sleep(time.Second * time.Duration(config.WaitTime))
+	readArrChan := make(chan []float64)
+	go func() {
+		fileWriter(readArrChan, readFile)
+	}()
 
 	log.Info().Msg("Testing Read...")
 	readClients := createReadClients()
@@ -153,7 +219,7 @@ func main() {
 	for i := 0; i < config.ClientNum; i++ {
 		index := i % l
 		tester.Wg.Add(1)
-		go executeGet(i, config.TestTimes, readClients[index], readFile)
+		go executeGet(i, config.TestTimes, readClients[index], readArrChan)
 	}
 	tester.Wg.Wait()
 	t4 := time.Now()
@@ -161,6 +227,8 @@ func main() {
 	// Calculate the duration
 	dur := t2.Sub(t1)
 	durRead := t4.Sub(t3)
+	close(writerArrChan)
+	close(readArrChan)
 
 	order := 1
 	if tester.Multi != nil {
@@ -204,14 +272,15 @@ func main() {
 				Msg("* Summary")
 		}
 	}
-	go statreader.PercentileCal(writeFilePath)
-	go statreader.PercentileCal(readFilePath)
 
 	log.Debug().Msg("Deleting testing data...")
 	for i := 0; i < config.ClientNum; i++ {
 		tester.Wg.Add(1)
 		go executeDel(i, config.TestTimes, redisClient)
 	}
+
+	fileReader(writeFilePath)
+	fileReader(readFilePath)
 	tester.Wg.Wait()
 	log.Debug().Msg("Over")
 }

@@ -41,7 +41,7 @@ func readNumbersFromFile(filename string) ([]float64, error) {
 	return numbers, nil
 }
 
-func percentile(numbers []float64, percentile float64) float64 {
+func Percentile(numbers []float64, percentile float64) float64 {
 	k := (percentile / 100) * float64(len(numbers)-1)
 	f := int(k)
 	c := k - float64(f)
@@ -67,9 +67,9 @@ func PercentileCal(filename string) {
 
 	min, max := minMax(numbers)
 
-	p90 := percentile(numbers, 90)
-	p95 := percentile(numbers, 95)
-	p99 := percentile(numbers, 99)
+	p90 := Percentile(numbers, 90)
+	p95 := Percentile(numbers, 95)
+	p99 := Percentile(numbers, 99)
 
 	if strings.Contains(filename, "write") {
 		log.Info().Msgf("Write percentile- p90: %.6f, p95: %.6f, p99: %.6f, min: %.6f, max: %.6f", p90, p95, p99, min, max)
