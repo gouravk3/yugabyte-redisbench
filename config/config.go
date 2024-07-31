@@ -46,6 +46,6 @@ func Parse() {
 	flag.StringVar(&MultiAddr, "ma", "", "addresses for run multiple testers at the same time")
 	flag.IntVar(&MultiOrder, "mo", 0, "the order current tester is in multiple testers")
 	flag.StringVar(&ReadClientAddrs, "cl", "127.0.0.1:6379", "addresses for multiple read replicas")
-	flag.IntVar(&WaitTime, "wt", 10, "Wait time(in seconds) for writes to get replicated")
+	flag.IntVar(&WaitTime, "wt", 10, "wait time(in seconds) for writes to get replicated")
 	flag.Parse()
 }

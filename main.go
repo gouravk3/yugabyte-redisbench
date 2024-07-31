@@ -137,9 +137,9 @@ func fileReader(name string) {
 	p99 := statreader.Percentile(data, 99)
 
 	if strings.Contains(name, "write") {
-		log.Info().Msgf("Write percentile - p90: %.6f, p95: %.6f, p99: %.6f, min: %.6f, max: %.6f", p90, p95, p99, min, max)
+		log.Info().Msgf("Write percentile(ms) - p90: %.6f, p95: %.6f, p99: %.6f, min: %.6f, max: %.6f", p90, p95, p99, min, max)
 	} else {
-		log.Info().Msgf("Read percentile - p90: %.6f, p95: %.6f, p99: %.6f, min: %.6f, max: %.6f", p90, p95, p99, min, max)
+		log.Info().Msgf("Read percentile(ms) - p90: %.6f, p95: %.6f, p99: %.6f, min: %.6f, max: %.6f", p90, p95, p99, min, max)
 	}
 }
 

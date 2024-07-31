@@ -31,6 +31,10 @@ Usage of redisbench:
         Testing times at every client (default 3000)
   -p string
         The password for auth, only for non-cluster
+  -cl string
+        addresses for multiple read replicas
+  -wt int
+        wait time(in seconds) for writes to get replicated
 ```
 
 ## Example
@@ -40,6 +44,12 @@ Usage of redisbench:
 ```
 
 ![](doc/one.png)
+
+## Use multiple read replicas
+
+```
+./redisbench -a localhost:6379 -c 10 -n 5000 -d 1000 -wt 30 -cl localhost:6379,localhost:6380,localhost:6381
+```
 
 ### Use multiple testing nodes
 
